@@ -145,7 +145,7 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 		hudson.tasks.test.TestResult previousResult = getPreviousResult(result);
 		while (previousResult != null) {
 			testResultsFromNewestToOldest.add(
-					new Result(previousResult.getOwner().getNumber(), previousResult.isPassed()));
+					new Result(previousResult.getRun().getNumber(), previousResult.isPassed()));
 			previousResult = previousResult.getPreviousResult();
 		}
 
