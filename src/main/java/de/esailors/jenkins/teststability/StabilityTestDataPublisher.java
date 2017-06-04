@@ -26,7 +26,9 @@ package de.esailors.jenkins.teststability;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
-import hudson.model.*;
+import hudson.model.Descriptor;
+import hudson.model.Run;
+import hudson.model.TaskListener;
 import hudson.tasks.junit.PackageResult;
 import hudson.tasks.junit.TestDataPublisher;
 import hudson.tasks.junit.TestResult;
@@ -48,6 +50,7 @@ import org.kohsuke.stapler.StaplerRequest;
 import de.esailors.jenkins.teststability.StabilityTestData.Result;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 /**
  * {@link TestDataPublisher} for the test stability history.
@@ -62,14 +65,17 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 	public StabilityTestDataPublisher() {
 	}
 	
+	// param is top level TestResult for a build
 	@Override
 	public Data contributeTestData(Run<?, ?> run, @Nonnull FilePath workspace, Launcher launcher, TaskListener listener,
 								   TestResult testResult) throws IOException, InterruptedException {
 
 		Map<String,CircularStabilityHistory> stabilityHistoryPerTest = new HashMap<String,CircularStabilityHistory>();
-		
+
+		// NB: abstract TestResult
 		Collection<hudson.tasks.test.TestResult> classAndCaseResults = getClassAndCaseResults(testResult);
 		debug("Found " + classAndCaseResults.size() + " test results", listener);
+		// NB: abstract TestResult
 		for (hudson.tasks.test.TestResult result: classAndCaseResults) {
 			
 			CircularStabilityHistory history = getPreviousHistory(result);
@@ -92,6 +98,7 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 				} else {
 					stabilityHistoryPerTest.remove(result.getId());
 				}
+				// TODO perhaps it would be better to buildUpInitialHistory for passing tests too (after JENKINS-33168 is fixed)
 			} else if (isFirstTestFailure(result, history)) {
 				debug("Found failed test " + result.getId(), listener);
 				int maxHistoryLength = getDescriptor().getMaxHistoryLength();
@@ -114,8 +121,10 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 		}
 	}
 
+	// NB: abstract TestResult
 	private CircularStabilityHistory getPreviousHistory(hudson.tasks.test.TestResult result) {
-		hudson.tasks.test.TestResult previous = getPreviousResult(result);
+		// NB: abstract TestResult
+		hudson.tasks.test.TestResult previous = getPreviousResultSafely(result);
 
 		if (previous != null) {
 			StabilityTestAction previousAction = previous.getTestAction(StabilityTestAction.class);
@@ -135,14 +144,17 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 		return null;
 	}
 
+	// NB: abstract TestResult
 	private boolean isFirstTestFailure(hudson.tasks.test.TestResult result,
 			CircularStabilityHistory previousRingBuffer) {
 		return previousRingBuffer == null && result.getFailCount() > 0;
 	}
-	
+
+	// NB: abstract TestResult
 	private void buildUpInitialHistory(CircularStabilityHistory ringBuffer, hudson.tasks.test.TestResult result, int number) {
 		List<Result> testResultsFromNewestToOldest = new ArrayList<Result>(number);
-		hudson.tasks.test.TestResult previousResult = getPreviousResult(result);
+		// NB: abstract TestResult
+		hudson.tasks.test.TestResult previousResult = getPreviousResultSafely(result);
 		while (previousResult != null) {
 			testResultsFromNewestToOldest.add(
 					new Result(previousResult.getRun().getNumber(), previousResult.isPassed()));
@@ -154,38 +166,108 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 		}
 	}
 
-	
-	private hudson.tasks.test.TestResult getPreviousResult(hudson.tasks.test.TestResult result) {
+
+	// NB: abstract TestResult
+	private @Nullable hudson.tasks.test.TestResult getPreviousResultSafely(hudson.tasks.test.TestResult result) {
 		try {
 			return result.getPreviousResult();
-		} catch (RuntimeException e) {
+		} catch (NullPointerException e) {
 			// there's a bug (only on freestyle builds!) that getPreviousResult may throw a NPE (only for ClassResults!) in Jenkins 1.480
 			// Note: doesn't seem to occur anymore in Jenkins 1.520
 			// Don't know about the versions between 1.480 and 1.520
-			
-			
-			// TODO: Untested:
-//			if (result instanceof ClassResult) {
-//				ClassResult cr = (ClassResult) result;
-//				PackageResult pkgResult = cr.getParent();
-//				hudson.tasks.test.TestResult topLevelPrevious = pkgResult.getParent().getPreviousResult();
-//				if (topLevelPrevious != null) {
-//					if (topLevelPrevious instanceof TestResult) {
-//						TestResult junitTestResult = (TestResult) topLevelPrevious;
-//						PackageResult prvPkgResult = junitTestResult.byPackage(pkgResult.getName());
-//						if (pkgResult != null) {
-//							return pkgResult.getClassResult(cr.getName());
-//						}
-//					}
-//				}
-//					
-//			}
-			
+			// Update: This also happens when running pipeline integration tests
+
+			if (result instanceof ClassResult) {
+				ClassResult classResult = (ClassResult) result;
+				PackageResult pkgResult = classResult.getParent();
+				TestResult topLevel = pkgResult.getParent();
+				hudson.tasks.test.TestResult prevTopLevel = topLevel.getPreviousResult();
+				if (prevTopLevel != null) {
+					if (prevTopLevel instanceof TestResult) {
+						TestResult prevJunitTestResult = (TestResult) prevTopLevel;
+						PackageResult prevPkgResult = prevJunitTestResult.byPackage(pkgResult.getName());
+						if (prevPkgResult != null) {
+							return prevPkgResult.getClassResult(classResult.getName());
+						}
+					}
+					// else something is weird if the previousResult has a different class!
+				}
+			}
+			// TODO log something, or just throw e
 			return null;
 		}
 	}
-	
+
+//	/**
+//	 * TestResult.getPreviousResult() throws NPE when getParentAction() returns null (eg try running PipelineTest),
+//	 * so this method emulates it but uses its own implementation of getParentAction().
+//	 * @see hudson.tasks.test.TestResult#getPreviousResult()
+//	 * @see hudson.tasks.test.TestResult#getParentAction()
+//	 * @param testResult
+//	 * @return
+//	 */
+//	// NB: abstract TestResult
+//	private @Nullable hudson.tasks.test.TestResult getPreviousResult(hudson.tasks.test.TestResult testResult) {
+//		@Nullable AbstractTestResultAction parentAction = getParentAction(testResult);
+//		if (parentAction == null) {
+//			// This probably shouldn't happen
+//			return null;
+//		}
+//		Run<?,?> run = testResult.getRun();
+//		if (run == null) {
+//			// This probably shouldn't happen either
+//			return null;
+//		}
+//		while (true) {
+//			run = run.getPreviousBuild();
+//			if (run == null) {
+//				return null;
+//			}
+//			// get corresponding action for 'run'
+//			AbstractTestResultAction r = run.getAction(parentAction.getClass());
+//			if (r != null) {
+//				hudson.tasks.test.TestResult result = r.findCorrespondingResult(testResult.getId());
+//				if (result != null) {
+//					return result;
+//				}
+//			}
+//		}
+//	}
+//
+//	private AbstractTestResultAction getParentAction(hudson.tasks.test.TestResult thisResult) {
+//		if (thisResult instanceof PackageResult) {
+//			return getParentAction((PackageResult) thisResult);
+//		} else if (thisResult instanceof ClassResult) {
+//			return getParentAction((ClassResult) thisResult);
+//		} else if (thisResult instanceof CaseResult) {
+//			return getParentAction((CaseResult) thisResult);
+//		} else if (thisResult instanceof TestResult) {
+//			return getParentAction((TestResult) thisResult);
+//		} else {
+//			// (just in case) probably SimpleCaseResult
+//			return thisResult.getParentAction();
+//		}
+//	}
+//
+//	private AbstractTestResultAction getParentAction(CaseResult caseResult) {
+//		return getParentAction(caseResult.getParent());
+//	}
+//
+//	private AbstractTestResultAction getParentAction(ClassResult classResult) {
+//		return getParentAction(classResult.getParent());
+//	}
+//
+//	private AbstractTestResultAction getParentAction(PackageResult packageResult) {
+//		return getParentAction(packageResult.getParent());
+//	}
+//
+//	private AbstractTestResultAction getParentAction(hudson.tasks.junit.TestResult buildTestResult) {
+//		return buildTestResult.getParentAction();
+//	}
+
+	// NB: param is top level TestResult for a build, returns abstract TestResults (classes and their cases)
 	private Collection<hudson.tasks.test.TestResult> getClassAndCaseResults(TestResult testResult) {
+		// NB: abstract TestResult
 		List<hudson.tasks.test.TestResult> results = new ArrayList<hudson.tasks.test.TestResult>();
 		
 		Collection<PackageResult> packageResults = testResult.getChildren();
