@@ -79,7 +79,7 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 		for (hudson.tasks.test.TestResult result: classAndCaseResults) {
 			
 			CircularStabilityHistory history = getPreviousHistory(result);
-			
+
 			if (history != null) {
 				if (result.isPassed()) {
 					history.add(run.getNumber(), true);
@@ -99,7 +99,9 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 					stabilityHistoryPerTest.remove(result.getId());
 				}
 				// TODO perhaps it would be better to buildUpInitialHistory for passing tests too (after JENKINS-33168 is fixed)
-			} else if (isFirstTestFailure(result, history)) {
+			} else if (result.getFailCount() > 0) {
+				// StabilityTestDataPublisher doesn't have a previous record of this failing test
+				// (eg StabilityTestDataPublisher wasn't enabled when it last failed)
 				debug("Found failed test " + result.getId(), listener);
 				int maxHistoryLength = getDescriptor().getMaxHistoryLength();
 				CircularStabilityHistory ringBuffer = new CircularStabilityHistory(maxHistoryLength);
@@ -142,12 +144,6 @@ public class StabilityTestDataPublisher extends TestDataPublisher {
 			}
 		}
 		return null;
-	}
-
-	// NB: abstract TestResult
-	private boolean isFirstTestFailure(hudson.tasks.test.TestResult result,
-			CircularStabilityHistory previousRingBuffer) {
-		return previousRingBuffer == null && result.getFailCount() > 0;
 	}
 
 	// NB: abstract TestResult
