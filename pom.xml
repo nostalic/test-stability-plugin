@@ -3,7 +3,7 @@
   <parent>
     <groupId>org.jenkins-ci.plugins</groupId>
     <artifactId>plugin</artifactId>
-    <version>1.596</version><!-- which version of Jenkins is this plugin built against? -->
+    <version>2.25</version>
   </parent>
 
   <groupId>de.esailors.jenkins</groupId>
@@ -44,11 +44,10 @@
   </pluginRepositories>
 
   <properties>
-    <!--
-      explicitly specifying the latest version here because one we get from the parent POM
-      tends to lag behind a bit
-    -->
-    <maven-hpi-plugin.version>1.95</maven-hpi-plugin.version>
+    <!--  to get jenkins.model.queue.AsynchronousExecution for JenkinsRule: -->
+    <jenkins.version>1.607</jenkins.version>
+    <jenkins-test-harness.version>2.19</jenkins-test-harness.version>
+    <workflow-plugin.version>1.14.2</workflow-plugin.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   
@@ -58,7 +57,39 @@
           <groupId>org.jenkins-ci.plugins</groupId>
           <artifactId>junit</artifactId>
           <scope>compile</scope>
-          <version>1.6</version>
+          <!-- updated for https://issues.jenkins-ci.org/browse/JENKINS-26535 -->
+          <version>1.14</version>
+      </dependency>
+      <!-- test dependencies -->
+      <dependency>
+          <groupId>org.assertj</groupId>
+          <artifactId>assertj-core</artifactId>
+          <version>2.6.0</version>
+          <scope>test</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.jenkins-ci.plugins.workflow</groupId>
+          <artifactId>workflow-basic-steps</artifactId>
+          <version>${workflow-plugin.version}</version>
+          <scope>test</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.jenkins-ci.plugins.workflow</groupId>
+          <artifactId>workflow-cps</artifactId>
+          <version>${workflow-plugin.version}</version>
+          <scope>test</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.jenkins-ci.plugins.workflow</groupId>
+          <artifactId>workflow-durable-task-step</artifactId>
+          <version>${workflow-plugin.version}</version>
+          <scope>test</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.jenkins-ci.plugins.workflow</groupId>
+          <artifactId>workflow-job</artifactId>
+          <version>${workflow-plugin.version}</version>
+          <scope>test</scope>
       </dependency>
   </dependencies>
   
